@@ -17,9 +17,13 @@ load_dotenv()
 
 app = Flask(__name__)
 
-SUPABASE_URL = os.environ['SUPABASE_URL']
-SUPABASE_KEY = os.environ['SUPABASE_KEY']
+SUPABASE_URL = os.environ.get('SUPABASE_URL', '').strip()
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '').strip()
 BUCKET = 'photos'
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    print('エラー: SUPABASE_URL または SUPABASE_KEY が設定されていません')
+    exit(1)
 
 sb = create_client(SUPABASE_URL, SUPABASE_KEY)
 
