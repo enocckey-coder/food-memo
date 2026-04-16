@@ -43,30 +43,45 @@
       font-weight: 300;
     }
 
-    /* Filter tabs */
-    .filter-bar {
+    /* Search bar */
+    .search-bar {
       background: white;
-      display: flex;
-      overflow-x: auto;
+      padding: 10px 12px;
       border-bottom: 1px solid #e0e0e0;
-      scrollbar-width: none;
+      display: flex;
+      gap: 8px;
+      position: sticky;
+      top: 56px;
+      z-index: 99;
     }
-    .filter-bar::-webkit-scrollbar { display: none; }
-    .filter-btn {
-      flex-shrink: 0;
-      padding: 10px 16px;
-      border: none;
-      background: none;
+    .search-input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 15px;
+      font-family: inherit;
+      background: #f9f9f9;
+    }
+    .search-input:focus { outline: none; border-color: #4CAF50; background: white; }
+    .date-input {
+      padding: 8px 6px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+      background: #f9f9f9;
+      width: 130px;
+    }
+    .date-input:focus { outline: none; border-color: #4CAF50; background: white; }
+    .btn-clear-search {
+      padding: 8px 10px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #f0f0f0;
       font-size: 14px;
       cursor: pointer;
-      color: #666;
-      border-bottom: 2px solid transparent;
       white-space: nowrap;
-    }
-    .filter-btn.active {
-      color: #4CAF50;
-      border-bottom-color: #4CAF50;
-      font-weight: 600;
     }
 
     /* Date groups */
@@ -260,16 +275,28 @@
     }
     .photo-preview.show { display: block; }
     .photo-input-area {
+      display: flex;
+      gap: 8px;
+    }
+    .photo-btn {
+      flex: 1;
       border: 2px dashed #ddd;
       border-radius: 8px;
-      padding: 20px;
+      padding: 16px 8px;
       text-align: center;
       cursor: pointer;
-      color: #aaa;
-      font-size: 14px;
+      color: #888;
+      font-size: 13px;
+      background: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
     }
-    .photo-input-area:hover { border-color: #4CAF50; color: #4CAF50; }
-    #photo-input { display: none; }
+    .photo-btn:hover { border-color: #4CAF50; color: #4CAF50; }
+    .photo-btn .photo-icon { font-size: 24px; }
+    #photo-input-file   { display: none; }
+    #photo-input-camera { display: none; }
 
     /* Action buttons */
     .modal-actions {
@@ -328,6 +355,13 @@
       color: #aaa;
       font-size: 15px;
     }
+
+    .search-result-count {
+      padding: 6px 16px;
+      font-size: 12px;
+      color: #999;
+      background: #f5f5f5;
+    }
   </style>
 </head>
 <body>
@@ -337,13 +371,10 @@
   <button class="btn-add" onclick="openAddModal()">＋</button>
 </div>
 
-<div class="filter-bar" id="filterBar">
-  <button class="filter-btn active" data-filter="all" onclick="setFilter('all', this)">すべて</button>
-  <button class="filter-btn" data-filter="breakfast" onclick="setFilter('breakfast', this)">朝食</button>
-  <button class="filter-btn" data-filter="lunch" onclick="setFilter('lunch', this)">昼食</button>
-  <button class="filter-btn" data-filter="dinner" onclick="setFilter('dinner', this)">夕食</button>
-  <button class="filter-btn" data-filter="snack" onclick="setFilter('snack', this)">間食</button>
-  <button class="filter-btn" data-filter="other" onclick="setFilter('other', this)">その他</button>
+<div class="search-bar">
+  <input type="text" class="search-input" id="searchText" placeholder="🔍 テキスト検索..." oninput="renderList()">
+  <input type="month" class="date-input" id="searchMonth" onchange="renderList()">
+  <button class="btn-clear-search" onclick="clearSearch()">✕</button>
 </div>
 
 <div id="mealList"><div class="loading">読み込み中...</div></div>
@@ -388,10 +419,18 @@
       <div class="form-group">
         <label>写真（任意）</label>
         <img id="photoPreview" class="photo-preview" alt="プレビュー">
-        <div class="photo-input-area" onclick="document.getElementById('photo-input').click()">
-          📷 タップして写真を選択
+        <div class="photo-input-area">
+          <button class="photo-btn" onclick="document.getElementById('photo-input-camera').click()">
+            <span class="photo-icon">📷</span>
+            <span>カメラで撮影</span>
+          </button>
+          <button class="photo-btn" onclick="document.getElementById('photo-input-file').click()">
+            <span class="photo-icon">🖼️</span>
+            <span>アルバムから選択</span>
+          </button>
         </div>
-        <input type="file" id="photo-input" accept="image/*" onchange="previewPhoto(this)">
+        <input type="file" id="photo-input-camera" accept="image/*" capture="environment" onchange="previewPhoto(this)">
+        <input type="file" id="photo-input-file"   accept="image/*" onchange="previewPhoto(this)">
       </div>
     </div>
     <div class="modal-actions">
@@ -438,8 +477,8 @@
   };
 
   let allMeals = [];
-  let currentFilter = 'all';
   let currentDetailId = null;
+  let selectedPhotoFile = null;
 
   // ---- Data Loading ----
   async function loadMeals() {
@@ -449,13 +488,24 @@
   }
 
   function renderList() {
-    const meals = currentFilter === 'all'
-      ? allMeals
-      : allMeals.filter(m => m.meal_type === currentFilter);
+    const textQuery = document.getElementById('searchText').value.trim().toLowerCase();
+    const monthQuery = document.getElementById('searchMonth').value; // "YYYY-MM"
+
+    let meals = allMeals;
+
+    if (textQuery) {
+      meals = meals.filter(m =>
+        (m.description || '').toLowerCase().includes(textQuery) ||
+        (m.location || '').toLowerCase().includes(textQuery)
+      );
+    }
+    if (monthQuery) {
+      meals = meals.filter(m => m.datetime && m.datetime.startsWith(monthQuery));
+    }
 
     const container = document.getElementById('mealList');
     if (meals.length === 0) {
-      container.innerHTML = `<div class="empty-state"><div class="icon">🍽</div><p>記録がありません</p></div>`;
+      container.innerHTML = `<div class="empty-state"><div class="icon">🍽</div><p>該当する記録がありません</p></div>`;
       return;
     }
 
@@ -467,7 +517,11 @@
       groups[d].push(m);
     });
 
-    let html = '';
+    const totalText = (textQuery || monthQuery)
+      ? `<div class="search-result-count">${meals.length}件が見つかりました</div>`
+      : '';
+
+    let html = totalText;
     Object.keys(groups).sort((a,b) => b.localeCompare(a)).forEach(date => {
       html += `<div class="date-group-label">${formatDate(date)}</div>`;
       groups[date].forEach(m => {
@@ -480,9 +534,14 @@
   function mealCardHTML(m) {
     const t = TYPES[m.meal_type] || TYPES.other;
     const time = m.datetime ? m.datetime.substring(11, 16) : '';
-    const thumb = m.photo
-      ? `<img class="meal-thumb" src="/uploads/${m.photo}" alt="食事写真" loading="lazy">`
-      : `<div class="meal-thumb-empty">${t.emoji}</div>`;
+    let thumb;
+    if (m.photo_url) {
+      thumb = `<img class="meal-thumb" src="${m.photo_url}" alt="食事写真" loading="lazy">`;
+    } else if (m.photo) {
+      thumb = `<img class="meal-thumb" src="/uploads/${m.photo}" alt="食事写真" loading="lazy">`;
+    } else {
+      thumb = `<div class="meal-thumb-empty">${t.emoji}</div>`;
+    }
     const loc = m.location ? `<div class="meal-location">📍 ${esc(m.location)}</div>` : '';
     return `
       <div class="meal-card" onclick="openDetail('${m.id}')">
@@ -498,11 +557,9 @@
       </div>`;
   }
 
-  // ---- Filter ----
-  function setFilter(filter, btn) {
-    currentFilter = filter;
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
+  function clearSearch() {
+    document.getElementById('searchText').value = '';
+    document.getElementById('searchMonth').value = '';
     renderList();
   }
 
@@ -514,8 +571,9 @@
 
     const t = TYPES[m.meal_type] || TYPES.other;
     const img = document.getElementById('detailImg');
-    if (m.photo) {
-      img.src = `/uploads/${m.photo}`;
+    const photoSrc = m.photo_url || (m.photo ? `/uploads/${m.photo}` : null);
+    if (photoSrc) {
+      img.src = photoSrc;
       img.style.display = 'block';
     } else {
       img.style.display = 'none';
@@ -559,7 +617,9 @@
     document.getElementById('editDatetime').value = localDatetimeValue();
     document.getElementById('photoPreview').className = 'photo-preview';
     document.getElementById('photoPreview').src = '';
-    document.getElementById('photo-input').value = '';
+    document.getElementById('photo-input-file').value = '';
+    document.getElementById('photo-input-camera').value = '';
+    selectedPhotoFile = null;
     document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('selected'));
     openModal('editModal');
   }
@@ -570,11 +630,14 @@
     document.getElementById('editDesc').value = m.description || '';
     document.getElementById('editLocation').value = m.location || '';
     document.getElementById('editDatetime').value = m.datetime ? m.datetime.substring(0,16) : localDatetimeValue();
-    document.getElementById('photo-input').value = '';
+    document.getElementById('photo-input-file').value = '';
+    document.getElementById('photo-input-camera').value = '';
+    selectedPhotoFile = null;
 
     const preview = document.getElementById('photoPreview');
-    if (m.photo) {
-      preview.src = `/uploads/${m.photo}`;
+    const photoSrc = m.photo_url || (m.photo ? `/uploads/${m.photo}` : null);
+    if (photoSrc) {
+      preview.src = photoSrc;
       preview.className = 'photo-preview show';
     } else {
       preview.src = '';
@@ -595,6 +658,7 @@
 
   function previewPhoto(input) {
     if (input.files && input.files[0]) {
+      selectedPhotoFile = input.files[0];
       const reader = new FileReader();
       reader.onload = e => {
         const preview = document.getElementById('photoPreview');
@@ -616,9 +680,8 @@
     formData.append('description', document.getElementById('editDesc').value);
     formData.append('location', document.getElementById('editLocation').value);
 
-    const photoInput = document.getElementById('photo-input');
-    if (photoInput.files[0]) {
-      formData.append('photo', photoInput.files[0]);
+    if (selectedPhotoFile) {
+      formData.append('photo', selectedPhotoFile);
     }
 
     const url = id ? `/api/meals/${id}` : '/api/meals';
