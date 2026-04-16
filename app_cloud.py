@@ -63,8 +63,17 @@ def index():
 
 @app.route('/api/meals', methods=['GET'])
 def get_meals():
-    result = sb.table('meals').select('*').order('datetime', desc=True).execute()
-    return jsonify(result.data)
+    PAGE = 1000
+    all_data = []
+    offset = 0
+    while True:
+        result = sb.table('meals').select('*').order('datetime', desc=True) \
+                   .range(offset, offset + PAGE - 1).execute()
+        all_data.extend(result.data)
+        if len(result.data) < PAGE:
+            break
+        offset += PAGE
+    return jsonify(all_data)
 
 
 @app.route('/api/meals', methods=['POST'])
