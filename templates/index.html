@@ -321,11 +321,20 @@
     .btn-secondary { background: #f0f0f0; color: #333; }
 
     /* Detail modal */
+    .detail-photos {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
     .detail-img {
       width: 100%;
-      max-height: 280px;
+      max-height: 300px;
       object-fit: cover;
-      border-radius: 0;
+      cursor: pointer;
+      display: block;
+    }
+    .detail-img:not(:last-child) {
+      border-bottom: 2px solid white;
     }
     .detail-body { padding: 20px; }
     .detail-meta {
@@ -347,6 +356,39 @@
       display: flex;
       gap: 12px;
       padding: 0 20px 20px;
+    }
+
+    /* Full screen image viewer */
+    .img-viewer {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: black;
+      z-index: 500;
+      align-items: center;
+      justify-content: center;
+    }
+    .img-viewer.open { display: flex; }
+    .img-viewer img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+    .img-viewer-close {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      color: white;
+      font-size: 36px;
+      cursor: pointer;
+      background: rgba(0,0,0,0.4);
+      border-radius: 50%;
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
     }
 
     .loading {
@@ -440,6 +482,12 @@
   </div>
 </div>
 
+<!-- Full screen image viewer -->
+<div class="img-viewer" id="imgViewer" onclick="closeImgViewer()">
+  <div class="img-viewer-close" onclick="closeImgViewer()">✕</div>
+  <img id="imgViewerImg" src="" alt="拡大表示">
+</div>
+
 <!-- Detail Modal -->
 <div class="modal-overlay" id="detailModal" onclick="closeOnOverlay(event, 'detailModal')">
   <div class="modal">
@@ -448,7 +496,7 @@
       <span class="modal-title">詳細</span>
       <button class="btn-close" onclick="closeModal('detailModal')">✕</button>
     </div>
-    <img id="detailImg" class="detail-img" style="display:none" alt="食事写真">
+    <div class="detail-photos" id="detailPhotos"></div>
     <div class="detail-body">
       <div class="detail-meta">
         <span class="detail-type-badge" id="detailBadge"></span>
@@ -563,6 +611,16 @@
     renderList();
   }
 
+  // ---- Image viewer ----
+  function openImgViewer(src) {
+    document.getElementById('imgViewerImg').src = src;
+    document.getElementById('imgViewer').classList.add('open');
+  }
+  function closeImgViewer() {
+    document.getElementById('imgViewer').classList.remove('open');
+    document.getElementById('imgViewerImg').src = '';
+  }
+
   // ---- Detail Modal ----
   function openDetail(id) {
     const m = allMeals.find(x => x.id === id);
@@ -570,13 +628,20 @@
     currentDetailId = id;
 
     const t = TYPES[m.meal_type] || TYPES.other;
-    const img = document.getElementById('detailImg');
-    const photoSrc = m.photo_url || (m.photo ? `/uploads/${m.photo}` : null);
-    if (photoSrc) {
-      img.src = photoSrc;
-      img.style.display = 'block';
+
+    // 複数写真対応
+    let photos = [];
+    try { photos = JSON.parse(m.photo_urls || '[]'); } catch(e) {}
+    if (!photos.length && m.photo_url) photos = [m.photo_url];
+    if (!photos.length && m.photo) photos = [`/uploads/${m.photo}`];
+
+    const photosEl = document.getElementById('detailPhotos');
+    if (photos.length > 0) {
+      photosEl.innerHTML = photos.map(src =>
+        `<img class="detail-img" src="${src}" alt="食事写真" loading="lazy" onclick="openImgViewer('${src}')">`
+      ).join('');
     } else {
-      img.style.display = 'none';
+      photosEl.innerHTML = '';
     }
 
     document.getElementById('detailBadge').className = `detail-type-badge ${t.cls}`;

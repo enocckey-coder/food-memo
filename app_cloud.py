@@ -78,17 +78,22 @@ def get_meals():
 
 @app.route('/api/meals', methods=['POST'])
 def add_meal():
+    import json as _json
     meal_id = str(uuid.uuid4())
     dt = request.form.get('datetime', datetime.now().strftime('%Y-%m-%dT%H:%M'))
 
     photo_url = None
     photo_key = None
+    photo_urls = []
+    photo_keys = []
     if 'photo' in request.files:
         photo = request.files['photo']
         if photo and photo.filename:
             file_bytes = photo.read()
             try:
                 photo_url, photo_key = upload_photo(file_bytes, photo.content_type)
+                photo_urls = [photo_url]
+                photo_keys = [photo_key]
             except Exception:
                 pass
 
@@ -100,6 +105,8 @@ def add_meal():
         'location': request.form.get('location', ''),
         'photo_url': photo_url,
         'photo_key': photo_key,
+        'photo_urls': _json.dumps(photo_urls),
+        'photo_keys': _json.dumps(photo_keys),
         'created_at': datetime.now().isoformat(),
     }
     result = sb.table('meals').insert(meal).execute()
@@ -108,6 +115,7 @@ def add_meal():
 
 @app.route('/api/meals/<meal_id>', methods=['PUT'])
 def update_meal(meal_id):
+    import json as _json
     updates = {
         'datetime': request.form.get('datetime'),
         'meal_type': request.form.get('meal_type'),
@@ -120,18 +128,30 @@ def update_meal(meal_id):
     if 'photo' in request.files:
         photo = request.files['photo']
         if photo and photo.filename:
-            # 古い画像を削除
-            old = sb.table('meals').select('photo_key').eq('id', meal_id).execute()
-            if old.data and old.data[0].get('photo_key'):
+            old = sb.table('meals').select('photo_key,photo_keys').eq('id', meal_id).execute()
+            if old.data:
+                # 古いキーをすべて削除
+                old_keys = []
+                if old.data[0].get('photo_key'):
+                    old_keys.append(old.data[0]['photo_key'])
                 try:
-                    sb.storage.from_(BUCKET).remove([old.data[0]['photo_key']])
+                    extra = _json.loads(old.data[0].get('photo_keys') or '[]')
+                    old_keys.extend(extra)
                 except Exception:
                     pass
+                old_keys = list(set(old_keys))
+                if old_keys:
+                    try:
+                        sb.storage.from_(BUCKET).remove(old_keys)
+                    except Exception:
+                        pass
             file_bytes = photo.read()
             try:
                 url, key = upload_photo(file_bytes, photo.content_type)
                 updates['photo_url'] = url
                 updates['photo_key'] = key
+                updates['photo_urls'] = _json.dumps([url])
+                updates['photo_keys'] = _json.dumps([key])
             except Exception:
                 pass
 
