@@ -29,6 +29,7 @@
       box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     }
     .header h1 { font-size: 20px; font-weight: 700; }
+    .header-btns { display: flex; gap: 8px; align-items: center; }
     .btn-add {
       background: white;
       color: #4CAF50;
@@ -42,6 +43,19 @@
       cursor: pointer;
       font-weight: 300;
     }
+    .btn-ranking {
+      background: rgba(255,255,255,0.2);
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      font-size: 20px;
+      line-height: 40px;
+      text-align: center;
+      cursor: pointer;
+    }
+    .btn-ranking:active { background: rgba(255,255,255,0.35); }
 
     /* Search bar */
     .search-bar {
@@ -83,6 +97,23 @@
       cursor: pointer;
       white-space: nowrap;
     }
+
+    /* Cache status bar */
+    .cache-status {
+      background: white;
+      border-bottom: 1px solid #e8e8e8;
+      padding: 4px 16px;
+      font-size: 12px;
+      color: #999;
+      min-height: 24px;
+      display: flex;
+      align-items: center;
+      position: sticky;
+      top: 108px;
+      z-index: 98;
+    }
+    .cache-status.updating { color: #FF9800; }
+    .cache-status.done { color: #888; }
 
     /* Date groups */
     .date-group-label {
@@ -404,13 +435,78 @@
       color: #999;
       background: #f5f5f5;
     }
+
+    /* Ranking modal */
+    .ranking-search-wrap {
+      padding: 12px 20px 8px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .ranking-search-input {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 15px;
+      font-family: inherit;
+      background: #f9f9f9;
+    }
+    .ranking-search-input:focus { outline: none; border-color: #4CAF50; background: white; }
+
+    .ranking-list {
+      padding: 8px 0 16px;
+    }
+    .ranking-item {
+      display: flex;
+      align-items: center;
+      padding: 12px 20px;
+      border-bottom: 1px solid #f5f5f5;
+      gap: 12px;
+    }
+    .ranking-item:nth-child(even) { background: #fafafa; }
+    .ranking-item.rank-1 { background: #FFFDE7; }
+    .ranking-item.rank-2 { background: #F5F5F5; }
+    .ranking-item.rank-3 { background: #FBE9E7; }
+    .rank-badge {
+      font-size: 22px;
+      width: 36px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .rank-num {
+      font-size: 15px;
+      font-weight: 700;
+      color: #888;
+      width: 36px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .rank-name {
+      flex: 1;
+      font-size: 16px;
+      font-weight: 500;
+    }
+    .rank-count {
+      font-size: 14px;
+      color: #888;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .ranking-empty {
+      text-align: center;
+      padding: 40px 20px;
+      color: #aaa;
+      font-size: 15px;
+    }
   </style>
 </head>
 <body>
 
 <div class="header">
   <h1>🍽 食事メモ</h1>
-  <button class="btn-add" onclick="openAddModal()">＋</button>
+  <div class="header-btns">
+    <button class="btn-ranking" onclick="openRankingModal()" title="人気メニューランキング">🏆</button>
+    <button class="btn-add" onclick="openAddModal()">＋</button>
+  </div>
 </div>
 
 <div class="search-bar">
@@ -418,6 +514,8 @@
   <input type="month" class="date-input" id="searchMonth" onchange="renderList()">
   <button class="btn-clear-search" onclick="clearSearch()">✕</button>
 </div>
+
+<div class="cache-status" id="cacheStatus"></div>
 
 <div id="mealList"><div class="loading">読み込み中...</div></div>
 
@@ -515,6 +613,21 @@
   </div>
 </div>
 
+<!-- Ranking Modal -->
+<div class="modal-overlay" id="rankingModal" onclick="closeOnOverlay(event, 'rankingModal')">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <span class="modal-title">🏆 人気メニュー ランキング</span>
+      <button class="btn-close" onclick="closeModal('rankingModal')">✕</button>
+    </div>
+    <div class="ranking-search-wrap">
+      <input type="text" class="ranking-search-input" id="rankingSearch" placeholder="🔍 ランキング内を検索..." oninput="renderRanking()">
+    </div>
+    <div class="ranking-list" id="rankingList"></div>
+  </div>
+</div>
+
 <script>
   const TYPES = {
     breakfast: { label: '朝食', emoji: '🌅', cls: 'badge-breakfast' },
@@ -524,16 +637,79 @@
     other:     { label: 'その他', emoji: '📝', cls: 'badge-other' },
   };
 
+  const CACHE_KEY      = 'meals_cache';
+  const CACHE_TIME_KEY = 'meals_cache_time';
+  const CACHE_TTL_MS   = 30 * 24 * 60 * 60 * 1000; // 30 days
+
   let allMeals = [];
   let currentDetailId = null;
   let selectedPhotoFile = null;
+  let rankingData = []; // computed once per load
+
+  // ---- Cache helpers ----
+  function saveCache(meals) {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(meals));
+      localStorage.setItem(CACHE_TIME_KEY, String(Date.now()));
+    } catch(e) {}
+  }
+
+  function loadCache() {
+    try {
+      const ts = parseInt(localStorage.getItem(CACHE_TIME_KEY) || '0', 10);
+      if (!ts || Date.now() - ts > CACHE_TTL_MS) return null;
+      const raw = localStorage.getItem(CACHE_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch(e) { return null; }
+  }
+
+  function setCacheStatus(msg, state) {
+    const el = document.getElementById('cacheStatus');
+    el.textContent = msg;
+    el.className = 'cache-status ' + (state || '');
+  }
 
   // ---- Data Loading ----
   async function loadMeals() {
-    const res = await fetch('/api/meals');
-    allMeals = await res.json();
-    renderList();
+    // Show cached data immediately if available
+    const cached = loadCache();
+    if (cached && cached.length > 0) {
+      allMeals = cached;
+      renderList();
+      setCacheStatus('キャッシュ表示中 🔄 更新中...', 'updating');
+    } else {
+      setCacheStatus('読み込み中...', '');
+    }
+
+    // Fetch fresh data in background
+    try {
+      const res = await fetch('/api/meals');
+      const fresh = await res.json();
+      allMeals = fresh;
+      saveCache(fresh);
+      rankingData = []; // invalidate ranking cache
+      renderList();
+      const now = new Date();
+      const hhmm = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+      setCacheStatus('最終更新: ' + hhmm, 'done');
+    } catch(e) {
+      if (allMeals.length > 0) {
+        setCacheStatus('オフライン（キャッシュ表示中）', 'updating');
+      } else {
+        setCacheStatus('読み込み失敗', '');
+        document.getElementById('mealList').innerHTML =
+          '<div class="empty-state"><div class="icon">⚠️</div><p>データを取得できませんでした</p></div>';
+      }
+    }
   }
+
+  // Save to cache on page unload
+  window.addEventListener('beforeunload', function() {
+    if (allMeals && allMeals.length > 0) {
+      saveCache(allMeals);
+    }
+  });
 
   function renderList() {
     const textQuery = document.getElementById('searchText').value.trim().toLowerCase();
@@ -609,6 +785,86 @@
     document.getElementById('searchText').value = '';
     document.getElementById('searchMonth').value = '';
     renderList();
+  }
+
+  // ---- Ranking ----
+  function parseMenuItems(description) {
+    if (!description) return [];
+    // Split by newlines, 「、」,「・」, spaces, 「/」,「／」
+    const raw = description.split(/[\n、・\s\/／]+/);
+    const result = [];
+    raw.forEach(item => {
+      const s = item.trim();
+      if (!s) return;                           // empty
+      if (s.length > 20) return;               // too long
+      if (s.length <= 1) return;               // single char
+      if (/^\d+$/.test(s)) return;             // pure number
+      if (/^\d{6,8}$/.test(s)) return;         // date-like (e.g. 20260416)
+      result.push(s.toLowerCase());
+    });
+    return result;
+  }
+
+  function computeRanking() {
+    const counts = {};
+    allMeals.forEach(m => {
+      const items = parseMenuItems(m.description);
+      items.forEach(item => {
+        counts[item] = (counts[item] || 0) + 1;
+      });
+    });
+    // Sort by count descending
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => ({ name, count }));
+  }
+
+  function openRankingModal() {
+    rankingData = computeRanking();
+    document.getElementById('rankingSearch').value = '';
+    renderRanking();
+    openModal('rankingModal');
+  }
+
+  function renderRanking() {
+    const query = document.getElementById('rankingSearch').value.trim().toLowerCase();
+    const medals = ['🥇', '🥈', '🥉'];
+    const container = document.getElementById('rankingList');
+
+    let filtered = rankingData;
+    if (query) {
+      filtered = filtered.filter(r => r.name.includes(query));
+    }
+
+    const top = filtered.slice(0, 10);
+
+    if (top.length === 0) {
+      container.innerHTML = '<div class="ranking-empty">該当するメニューがありません</div>';
+      return;
+    }
+
+    // When filtering, positions shown are relative to filtered list
+    // Rank displayed is position in full rankingData
+    let html = '';
+    top.forEach((item, idx) => {
+      // Find real rank in full list (1-indexed)
+      const realRank = rankingData.findIndex(r => r.name === item.name) + 1;
+      const displayName = item.name; // already lowercase from parsing
+      let rankCell;
+      if (realRank <= 3 && !query) {
+        rankCell = `<span class="rank-badge">${medals[realRank - 1]}</span>`;
+      } else {
+        rankCell = `<span class="rank-num">${realRank}.</span>`;
+      }
+      const rankClass = (!query && realRank <= 3) ? ` rank-${realRank}` : '';
+      html += `
+        <div class="ranking-item${rankClass}">
+          ${rankCell}
+          <span class="rank-name">${esc(displayName)}</span>
+          <span class="rank-count">${item.count}回</span>
+        </div>`;
+    });
+    container.innerHTML = html;
   }
 
   // ---- Image viewer ----
