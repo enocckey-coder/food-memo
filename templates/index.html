@@ -97,6 +97,18 @@
       cursor: pointer;
       white-space: nowrap;
     }
+    .btn-prev-year {
+      padding: 8px 10px;
+      border: 1px solid #4CAF50;
+      border-radius: 8px;
+      background: #E8F5E9;
+      color: #2E7D32;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      font-weight: 600;
+    }
+    .btn-prev-year:active { background: #C8E6C9; }
 
     /* Cache status bar */
     .cache-status {
@@ -512,6 +524,7 @@
 <div class="search-bar">
   <input type="text" class="search-input" id="searchText" placeholder="🔍 テキスト検索..." oninput="renderList()">
   <input type="month" class="date-input" id="searchMonth" onchange="renderList()">
+  <button class="btn-prev-year" onclick="jumpPrevYear()" title="前年同月を表示">前年</button>
   <button class="btn-clear-search" onclick="clearSearch()">✕</button>
 </div>
 
@@ -784,6 +797,20 @@
   function clearSearch() {
     document.getElementById('searchText').value = '';
     document.getElementById('searchMonth').value = '';
+    renderList();
+  }
+
+  function jumpPrevYear() {
+    const monthEl = document.getElementById('searchMonth');
+    let current = monthEl.value; // "YYYY-MM" or ""
+    if (!current) {
+      // 未選択なら今月を基準にする
+      const now = new Date();
+      current = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    }
+    const [y, m] = current.split('-');
+    const prevYear = parseInt(y) - 1;
+    monthEl.value = `${prevYear}-${m}`;
     renderList();
   }
 
